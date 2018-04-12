@@ -18,13 +18,98 @@ package sql2.parser
 
 import parseback._
 
-import scala.Int
+import scala.Any
+// FIXME: What is required for "foo".r support?
+import scala.Predef._
+import scala.util.matching.Regex
 
+/** Strict superset of SQL-92.
+  *
+  * SQL-92 parsing ported from the following BNF grammar
+  * https://ronsavage.github.io/SQL/sql-92.bnf.html
+  */
 object Sql2Parser {
 
-  lazy val p: Parser[Int] = (
-    "(" ~> p <~ ")" ^^ { (_, i) => i + 1 }
-      | () ^^^ 0
-    )
+  implicit final class CaseInsensitivePattern(val s: String) extends scala.AnyVal {
+    def ci: Regex = ("(?i)" + s).r
+  }
+
+  // Literal Numbers, Strings, Dates and Times
+
+  lazy val identifier: Parser[Any] =
+    ()
+
+
+  // SQL Module
+
+  lazy val columnName: Parser[Any] =
+    identifier
+
+
+  // Literals
+
+  lazy val literal: Parser[Any] =
+    ()
+
+
+  // Search Conditions
+
+  lazy val searchCondition: Parser[Any] =
+    ()
+
+  lazy val setQuantifier: Parser[Any] =
+    "DISTINCT".ci | "ALL".ci
+
+
+  // Queries
+
+  lazy val scalarSubquery: Parser[Any] =
+    subquery
+
+  lazy val subquery: Parser[Any] = (
+      "(" ~> queryExpression <~ ")"
+  )
+
+  lazy val queryExpression: Parser[Any] = (
+      nonJoinQueryExpression
+    | joinedTable
+  )
+
+  lazy val nonJoinQueryExpression: Parser[Any] = (
+      nonJoinQueryTerm
+    | queryExpression ~ "UNION".ci ~ "ALL".ci.? ~ correspondingSpec.? ~ queryTerm
+    | queryExpression ~ "EXCEPT".ci ~ "ALL".ci.? ~ correspondingSpec.? ~ queryTerm
+  )
+
+  lazy val nonJoinQueryTerm: Parser[Any] = (
+      nonJoinQueryPrimary
+    | queryTerm ~ "INTERSECT".ci ~ "ALL".ci.? ~ correspondingSpec.? ~ queryPrimary
+  )
+
+  lazy val nonJoinQueryPrimary: Parser[Any] = (
+      simpleTable
+    | "(" ~> nonJoinQueryExpression <~ ")"
+  )
+
+  lazy val simpleTable: Parser[Any] = (
+      querySpecification
+    | tableValueConstructor
+    | explicitTable
+  )
+
+  lazy val querySpecification: Parser[Any] =
+    "SELECT".ci ~ setQuantifier.? ~ selectList ~ tableExpression
+
+  lazy val selectList: Parser[Any] =
+    "*" | selectSublist ~ ("," ~ selectSublist).*
+
+  lazy val selectSublist: Parser[Any] =
+    derivedColumn | qualifier ~ ".*"
+
+  lazy val derivedColumn: Parser[Any] =
+    valueExpression ~ asClause.?
+
+  lazy val asClause: Parser[Any] =
+    "as".ci ~ columnName
 }
 
