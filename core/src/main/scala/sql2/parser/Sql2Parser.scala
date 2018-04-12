@@ -18,7 +18,9 @@ package sql2.parser
 
 import parseback._
 
-import scala.Any
+import java.lang.SuppressWarnings
+
+import scala.{Any, Array}
 // FIXME: What is required for "foo".r support?
 import scala.Predef._
 import scala.util.matching.Regex
@@ -28,11 +30,17 @@ import scala.util.matching.Regex
   * SQL-92 parsing ported from the following BNF grammar
   * https://ronsavage.github.io/SQL/sql-92.bnf.html
   */
+@SuppressWarnings(Array("org.wartremover.warts.JavaSerializable"))
 object Sql2Parser {
 
   implicit final class CaseInsensitivePattern(val s: String) extends scala.AnyVal {
     def ci: Regex = ("(?i)" + s).r
   }
+
+  // FIXME: Should be unecessary eventually.
+  def l(s: String): Parser[String] =
+    parseback.literal(s)
+
 
   // Literal Numbers, Strings, Dates and Times
 
@@ -42,8 +50,23 @@ object Sql2Parser {
 
   // SQL Module
 
+  lazy val qualifiedLocalTableName: Parser[Any] =
+    "MODULE".ci ~ "." ~ localTableName
+
+  lazy val localTableName: Parser[Any] =
+    qualifiedIdentifier
+
+  lazy val qualifiedIdentifier: Parser[Any] =
+    identifier
+
   lazy val columnName: Parser[Any] =
     identifier
+
+
+  // Data Types
+
+  lazy val qualifiedName: Parser[Any] =
+    ()
 
 
   // Literals
@@ -52,10 +75,45 @@ object Sql2Parser {
     ()
 
 
+  // Constraints
+
+  lazy val tableName: Parser[Any] =
+    qualifiedName | qualifiedLocalTableName
+
+  lazy val columnNameList: Parser[Any] =
+    columnName ~ (l(",") ~ columnName).*
+
+
   // Search Conditions
 
   lazy val searchCondition: Parser[Any] =
     ()
+
+  lazy val rowValueConstructor: Parser[Any] =
+    ()
+
+  lazy val valueExpression: Parser[Any] =
+    ()
+
+  lazy val columnReference: Parser[Any] =
+    (qualifier ~ ".").? ~ columnName
+
+  lazy val qualifier: Parser[Any] =
+    tableName | correlationName
+
+  lazy val correlationName: Parser[Any] =
+    identifier
+
+  lazy val setFunctionSpecification: Parser[Any] = (
+      "COUNT".ci ~ "(" ~ "*" ~ ")"
+    | generalSetFunction
+  )
+
+  lazy val generalSetFunction: Parser[Any] =
+    setFunctionType ~ "(" ~ setQuantifier.? ~ valueExpression ~ ")"
+
+  lazy val setFunctionType: Parser[Any] =
+    "AVG".ci | "MAX".ci | "MIN".ci | "SUM".ci | "COUNT".ci
 
   lazy val setQuantifier: Parser[Any] =
     "DISTINCT".ci | "ALL".ci
@@ -66,9 +124,8 @@ object Sql2Parser {
   lazy val scalarSubquery: Parser[Any] =
     subquery
 
-  lazy val subquery: Parser[Any] = (
-      "(" ~> queryExpression <~ ")"
-  )
+  lazy val subquery: Parser[Any] =
+    l("(") ~> queryExpression <~ l(")")
 
   lazy val queryExpression: Parser[Any] = (
       nonJoinQueryExpression
@@ -88,7 +145,7 @@ object Sql2Parser {
 
   lazy val nonJoinQueryPrimary: Parser[Any] = (
       simpleTable
-    | "(" ~> nonJoinQueryExpression <~ ")"
+    | l("(") ~> nonJoinQueryExpression <~ l(")")
   )
 
   lazy val simpleTable: Parser[Any] = (
@@ -100,16 +157,121 @@ object Sql2Parser {
   lazy val querySpecification: Parser[Any] =
     "SELECT".ci ~ setQuantifier.? ~ selectList ~ tableExpression
 
-  lazy val selectList: Parser[Any] =
-    "*" | selectSublist ~ ("," ~ selectSublist).*
+  lazy val selectList: Parser[Any] = (
+      l("*")
+    | selectSublist ~ (l(",") ~> selectSublist).*
+  )
 
   lazy val selectSublist: Parser[Any] =
-    derivedColumn | qualifier ~ ".*"
+    derivedColumn | qualifier ~ "." ~ "*"
 
   lazy val derivedColumn: Parser[Any] =
     valueExpression ~ asClause.?
 
   lazy val asClause: Parser[Any] =
-    "as".ci ~ columnName
+    "AS".ci ~ columnName
+
+  lazy val tableExpression: Parser[Any] = (
+      fromClause
+    | whereClause
+    | groupByClause
+    | havingClause
+  )
+
+  lazy val fromClause: Parser[Any] =
+    "FROM".ci ~ tableReference ~ (l(",") ~> tableReference).*
+
+  lazy val tableReference: Parser[Any] = (
+      tableName ~ correlationSpecification.?
+    | derivedTable ~ correlationSpecification
+    | joinedTable
+  )
+
+  lazy val correlationSpecification: Parser[Any] =
+    "AS".ci.? ~ correlationName ~ (l("(") ~> derivedColumnList <~ l(")")).?
+
+  lazy val derivedColumnList: Parser[Any] =
+    columnNameList
+
+  lazy val derivedTable: Parser[Any] =
+    tableSubquery
+
+  lazy val tableSubquery: Parser[Any] =
+    subquery
+
+  lazy val joinedTable: Parser[Any] = (
+      crossJoin
+    | qualifiedJoin
+    | l("(") ~> joinedTable <~ l(")")
+  )
+
+  lazy val crossJoin: Parser[Any] =
+    tableReference ~ "CROSS".ci ~ "JOIN".ci ~ tableReference
+
+  lazy val qualifiedJoin: Parser[Any] =
+    tableReference ~ "NATURAL".ci.? ~ joinType.? ~ "JOIN".ci ~ tableReference ~ joinSpecification.?
+
+  lazy val joinType: Parser[Any] = (
+      "INNER".ci
+    | outerJoinType ~ "OUTER".ci.?
+    | "UNION".ci
+  )
+
+  lazy val outerJoinType: Parser[Any] =
+    "LEFT".ci | "RIGHT".ci | "FULL".ci
+
+  lazy val joinSpecification: Parser[Any] =
+    joinCondition | namedColumnsJoin
+
+  lazy val joinCondition: Parser[Any] =
+    "ON".ci ~ searchCondition
+
+  lazy val namedColumnsJoin: Parser[Any] =
+    "USING".ci ~ (l("(") ~> joinColumnList <~ l(")"))
+
+  lazy val joinColumnList: Parser[Any] =
+    columnNameList
+
+  lazy val whereClause: Parser[Any] =
+    "WHERE".ci ~ searchCondition
+
+  lazy val groupByClause: Parser[Any] =
+    "GROUP".ci ~ "BY".ci ~ groupingColumnReferenceList
+
+  lazy val groupingColumnReferenceList: Parser[Any] =
+    groupingColumnReference ~ (l(",") ~> groupingColumnReference).*
+
+  lazy val groupingColumnReference: Parser[Any] =
+    columnReference ~ collateClause.?
+
+  lazy val collateClause: Parser[Any] =
+    "COLLATE".ci ~ collationName
+
+  lazy val collationName: Parser[Any] =
+    qualifiedName
+
+  lazy val havingClause: Parser[Any] =
+    "HAVING".ci ~ searchCondition
+
+  lazy val tableValueConstructor: Parser[Any] =
+    "VALUES".ci ~ tableValueConstructorList
+
+  lazy val tableValueConstructorList: Parser[Any] =
+    rowValueConstructor ~ (l(",") ~> rowValueConstructor).*
+
+  lazy val explicitTable: Parser[Any] =
+    "TABLE".ci ~ tableName
+
+  lazy val queryTerm: Parser[Any] =
+    nonJoinQueryTerm | joinedTable
+
+  lazy val correspondingSpec: Parser[Any] =
+    "CORRESPONDING".ci ~ ("BY".ci ~ (l("(") ~> correspondingColumnList <~ l(")")))
+
+  lazy val correspondingColumnList: Parser[Any] =
+    columnNameList
+
+  lazy val queryPrimary: Parser[Any] =
+    nonJoinQueryPrimary | joinedTable
 }
 
