@@ -71,11 +71,17 @@ object Sql2Parser {
   lazy val space: Parser[Any] =
     l(" ")
 
+  lazy val doubleQuote: Parser[Any] =
+    l("\"")
+
   lazy val quote: Parser[Any] =
     l("'")
 
   lazy val period: Parser[Any] =
     l(".")
+
+  lazy val underscore: Parser[Any] =
+    l("_")
 
   lazy val leftBracket: Parser[Any] =
     l("[")
@@ -97,7 +103,7 @@ object Sql2Parser {
   )
 
   lazy val unsignedInteger: Parser[Any] =
-    "\\d+".r
+    """\d+""".r
 
   lazy val approximateNumericLiteral: Parser[Any] =
     mantissa ~ "E".ci ~ exponent
@@ -115,17 +121,17 @@ object Sql2Parser {
     "[+-]".r
 
   lazy val nationalCharacterStringLiteral: Parser[Any] =
-    (("N".ci ~ quote) ~> characters.? <~ quote) ~ (separator.+ ~ (quote ~> characters.? <~ quote)).*
+    ("N".ci ~ quote ~!~ characters.? ~!~ quote) ~ (separator.+ ~ quote ~!~ characters.? ~!~ quote).*
 
   // NB: characterRepresentation+
   lazy val characters: Parser[Any] =
-    "([^']|'')+".r
+    "(?[^']|'')+".r
 
   lazy val separator: Parser[Any] =
     (comment | space | newline).+
 
   lazy val comment: Parser[Any] =
-    commentIntroducer ~> commentCharacters.? <~ newline
+    commentIntroducer ~ commentCharacters.? ~ newline
 
   lazy val commentIntroducer: Parser[Any] =
     "---*".r
@@ -138,14 +144,14 @@ object Sql2Parser {
     "\\n|\\r\\n".r
 
   lazy val bitStringLiteral: Parser[Any] =
-    (("B".ci ~ quote) ~> bits.? <~ quote) ~ (separator.+ ~ (quote ~> bits.? <~ quote)).*
+    ("B".ci ~ quote ~!~ bits.? ~!~ quote) ~ (separator.+ ~ quote ~!~ bits.? ~!~ quote).*
 
   // NB: bit+
   lazy val bits: Parser[Any] =
     "[01]+".r
 
   lazy val hexStringLiteral: Parser[Any] =
-    (("X".ci ~ quote) ~> hexits.? <~ quote) ~ (separator.+ ~ (quote ~> hexits.? <~ quote)).*
+    ("X".ci ~ quote ~!~ hexits.? ~!~ quote) ~ (separator.+ ~ quote ~!~ hexits.? ~!~ quote).*
 
   // NB: hexit+
   lazy val hexits: Parser[Any] =
@@ -166,10 +172,73 @@ object Sql2Parser {
     | rightBracket
 
   lazy val characterStringLiteral: Parser[Any] =
-    ()
+    (introducer ~ characterSetSpecification).? ~ (quote ~!~ characters.? ~!~ quote) ~ (separator.+ ~ quote ~!~ characters.? ~!~ quote).*
+
+  lazy val introducer: Parser[Any] =
+    underscore
+
+  lazy val characterSetSpecification: Parser[Any] = (
+      standardCharacterRepertoireName
+    | implementationDefinedCharacterRepertoireName
+    | userDefinedCharacterRepertoireName
+    | standardUniversalCharacterFormOfUseName
+    | implementationDefinedUniversalCharacterFormOfUseName
+  )
+
+  lazy val standardCharacterRepertoireName: Parser[Any] =
+    characterSetName
+
+  lazy val characterSetName: Parser[Any] =
+    (schemaName ~ period).? ~ sqlLanguageIdentifier
+
+  lazy val schemaName: Parser[Any] =
+    (catalogName ~ period).? ~ unqualifiedSchemaName
+
+  lazy val catalogName: Parser[Any] =
+    identifier
 
   lazy val identifier: Parser[Any] =
-    ()
+    (introducer ~ characterSetSpecification).? ~ actualIdentifier
+
+  lazy val actualIdentifier: Parser[Any] =
+    regularIdentifier | delimitedIdentifier
+
+  lazy val delimitedIdentifier: Parser[Any] =
+    doubleQuote ~!~ delimitedIdentifierBody ~!~ doubleQuote
+
+  lazy val delimitedIdentifierBody: Parser[Any] =
+    """(?[^"]|"")+""".r
+
+  lazy val unqualifiedSchemaName: Parser[Any] =
+    identifier
+
+  lazy val sqlLanguageIdentifier: Parser[Any] =
+    """\p{Alpha}\w*""".r
+
+  lazy val implementationDefinedCharacterRepertoireName: Parser[Any] =
+    characterSetName
+
+  lazy val userDefinedCharacterRepertoireName: Parser[Any] =
+    characterSetName
+
+  lazy val standardUniversalCharacterFormOfUseName: Parser[Any] =
+    characterSetName
+
+  lazy val implementationDefinedUniversalCharacterFormOfUseName: Parser[Any] =
+    characterSetName
+
+  lazy val dateString: Parser[Any] =
+    quote ~!~ dateValue ~!~ quote
+
+  lazy val dateValue: Parser[Any] =
+    """\d+-\d+-\d+""".r
+
+  lazy val timeString: Parser[Any] =
+    quote ~!~ timeAndZoneValue ~!~ quote
+
+  // NB: timeValue ~ timeZoneInterval.?
+  lazy val timeAndZoneValue: Parser[Any] =
+    """\d+:\d+:\d+(?.\d*)?(?[+-]\d+:\d+)?""".r
 
 
   // SQL Module
@@ -227,7 +296,7 @@ object Sql2Parser {
     booleanPrimary ~ ("IS".ci ~ "NOT".ci.? ~ truthValue).?
 
   lazy val booleanPrimary: Parser[Any] =
-    predicate | l("(") ~> searchCondition <~ l(")")
+    predicate | l("(") ~ searchCondition ~ l(")")
 
   lazy val predicate: Parser[Any] = (
       comparisonPredicate
@@ -246,7 +315,7 @@ object Sql2Parser {
 
   lazy val rowValueConstructor: Parser[Any] = (
       rowValueConstructorElement
-    | l("(") ~> rowValueConstructorList <~ l(")")
+    | l("(") ~ rowValueConstructorList ~ l(")")
     | rowSubquery
   )
 
@@ -287,7 +356,7 @@ object Sql2Parser {
     | setFunctionSpecification
     | scalarSubquery
     | caseExpression
-    | l("(") ~> valueExpression <~ l(")")
+    | l("(") ~ valueExpression ~ l(")")
     | castSpecification
   )
 
@@ -345,7 +414,7 @@ object Sql2Parser {
     subquery
 
   lazy val subquery: Parser[Any] =
-    l("(") ~> queryExpression <~ l(")")
+    l("(") ~ queryExpression ~ l(")")
 
   lazy val queryExpression: Parser[Any] = (
       nonJoinQueryExpression
@@ -365,7 +434,7 @@ object Sql2Parser {
 
   lazy val nonJoinQueryPrimary: Parser[Any] = (
       simpleTable
-    | l("(") ~> nonJoinQueryExpression <~ l(")")
+    | l("(") ~ nonJoinQueryExpression ~ l(")")
   )
 
   lazy val simpleTable: Parser[Any] = (
@@ -379,7 +448,7 @@ object Sql2Parser {
 
   lazy val selectList: Parser[Any] = (
       l("*")
-    | selectSublist ~ (l(",") ~> selectSublist).*
+    | selectSublist ~ (l(",") ~ selectSublist).*
   )
 
   lazy val selectSublist: Parser[Any] =
@@ -399,7 +468,7 @@ object Sql2Parser {
   )
 
   lazy val fromClause: Parser[Any] =
-    "FROM".ci ~ tableReference ~ (l(",") ~> tableReference).*
+    "FROM".ci ~ tableReference ~ (l(",") ~ tableReference).*
 
   lazy val tableReference: Parser[Any] = (
       tableName ~ correlationSpecification.?
@@ -408,7 +477,7 @@ object Sql2Parser {
   )
 
   lazy val correlationSpecification: Parser[Any] =
-    "AS".ci.? ~ correlationName ~ (l("(") ~> derivedColumnList <~ l(")")).?
+    "AS".ci.? ~ correlationName ~ (l("(") ~ derivedColumnList ~ l(")")).?
 
   lazy val derivedColumnList: Parser[Any] =
     columnNameList
@@ -422,7 +491,7 @@ object Sql2Parser {
   lazy val joinedTable: Parser[Any] = (
       crossJoin
     | qualifiedJoin
-    | l("(") ~> joinedTable <~ l(")")
+    | l("(") ~ joinedTable ~ l(")")
   )
 
   lazy val crossJoin: Parser[Any] =
@@ -447,7 +516,7 @@ object Sql2Parser {
     "ON".ci ~ searchCondition
 
   lazy val namedColumnsJoin: Parser[Any] =
-    "USING".ci ~ (l("(") ~> joinColumnList <~ l(")"))
+    "USING".ci ~ (l("(") ~ joinColumnList ~ l(")"))
 
   lazy val joinColumnList: Parser[Any] =
     columnNameList
@@ -459,7 +528,7 @@ object Sql2Parser {
     "GROUP".ci ~ "BY".ci ~ groupingColumnReferenceList
 
   lazy val groupingColumnReferenceList: Parser[Any] =
-    groupingColumnReference ~ (l(",") ~> groupingColumnReference).*
+    groupingColumnReference ~ (l(",") ~ groupingColumnReference).*
 
   lazy val groupingColumnReference: Parser[Any] =
     columnReference ~ collateClause.?
@@ -477,7 +546,7 @@ object Sql2Parser {
     "VALUES".ci ~ tableValueConstructorList
 
   lazy val tableValueConstructorList: Parser[Any] =
-    rowValueConstructor ~ (l(",") ~> rowValueConstructor).*
+    rowValueConstructor ~ (l(",") ~ rowValueConstructor).*
 
   lazy val explicitTable: Parser[Any] =
     "TABLE".ci ~ tableName
@@ -486,7 +555,7 @@ object Sql2Parser {
     nonJoinQueryTerm | joinedTable
 
   lazy val correspondingSpec: Parser[Any] =
-    "CORRESPONDING".ci ~ ("BY".ci ~ (l("(") ~> correspondingColumnList <~ l(")")))
+    "CORRESPONDING".ci ~ ("BY".ci ~ (l("(") ~ correspondingColumnList ~ l(")")))
 
   lazy val correspondingColumnList: Parser[Any] =
     columnNameList
