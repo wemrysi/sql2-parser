@@ -42,6 +42,48 @@ object Sql2Parser {
     parseback.literal(s)
 
 
+  // Basic Definitions of Characters Used, Tokens, Symbols, Etc.
+
+  //   space
+  // | doubleQuote
+  // | percent
+  // | ampersand
+  // | quote
+  // | leftParen
+  // | rightParen
+  // | asterisk
+  // | plusSign
+  // | comma
+  // | minusSign
+  // | period
+  // | solidus
+  // | colon
+  // | semicolon
+  // | lessThanOperator
+  // | greaterThanOperator
+  // | equalsOperator
+  // | questionMark
+  // | underscore
+  // | verticalBar
+  lazy val sqlSpecialCharacter: Parser[Any] =
+    """[ "%&'\(\)\*\+,-\.\\:;<>=\?_|]""".r
+
+  lazy val space: Parser[Any] =
+    l(" ")
+
+  lazy val quote: Parser[Any] =
+    l("'")
+
+  lazy val period: Parser[Any] =
+    l(".")
+
+  lazy val leftBracket: Parser[Any] =
+    l("[")
+
+  lazy val rightBracket: Parser[Any] =
+    l("]")
+
+
   // Literal Numbers, Strings, Dates and Times
 
   lazy val unsignedNumericLiteral: Parser[Any] = (
@@ -50,15 +92,15 @@ object Sql2Parser {
   )
 
   lazy val exactNumericLiteral: Parser[Any] = (
-      unsignedInteger ~ (l(".") ~ unsignedInteger.?).?
-    | l(".") ~ unsignedInteger
+      unsignedInteger ~ (period ~ unsignedInteger.?).?
+    | period ~ unsignedInteger
   )
 
   lazy val unsignedInteger: Parser[Any] =
     "\\d+".r
 
   lazy val approximateNumericLiteral: Parser[Any] =
-    mantissa ~ "E" ~ exponent
+    mantissa ~ "E".ci ~ exponent
 
   lazy val mantissa: Parser[Any] =
     exactNumericLiteral
@@ -71,6 +113,60 @@ object Sql2Parser {
 
   lazy val sign: Parser[Any] =
     "[+-]".r
+
+  lazy val nationalCharacterStringLiteral: Parser[Any] =
+    (("N".ci ~ quote) ~> characters.? <~ quote) ~ (separator.+ ~ (quote ~> characters.? <~ quote)).*
+
+  // NB: characterRepresentation+
+  lazy val characters: Parser[Any] =
+    "([^']|'')+".r
+
+  lazy val separator: Parser[Any] =
+    (comment | space | newline).+
+
+  lazy val comment: Parser[Any] =
+    commentIntroducer ~> commentCharacters.? <~ newline
+
+  lazy val commentIntroducer: Parser[Any] =
+    "---*".r
+
+  // NB: commentCharacter+
+  lazy val commentCharacters: Parser[Any] =
+    ".+".r
+
+  lazy val newline: Parser[Any] =
+    "\\n|\\r\\n".r
+
+  lazy val bitStringLiteral: Parser[Any] =
+    (("B".ci ~ quote) ~> bits.? <~ quote) ~ (separator.+ ~ (quote ~> bits.? <~ quote)).*
+
+  // NB: bit+
+  lazy val bits: Parser[Any] =
+    "[01]+".r
+
+  lazy val hexStringLiteral: Parser[Any] =
+    (("X".ci ~ quote) ~> hexits.? <~ quote) ~ (separator.+ ~ (quote ~> hexits.? <~ quote)).*
+
+  // NB: hexit+
+  lazy val hexits: Parser[Any] =
+    "\p{XDigit}+".r
+
+  lazy val delimiterToken: Parser[Any] = (
+      characterStringLiteral
+    | dateString
+    | timeString
+    | timestampString
+    | delimitedIdentifier
+    | sqlSpecialCharacter
+    | notEqualsOperator
+    | greaterThanOrEqualsOperator
+    | concatenationOperator
+    | doublePeriod
+    | leftBracket
+    | rightBracket
+
+  lazy val characterStringLiteral: Parser[Any] =
+    ()
 
   lazy val identifier: Parser[Any] =
     ()
