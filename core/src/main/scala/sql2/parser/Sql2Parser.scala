@@ -796,6 +796,105 @@ object Sql2Parser {
   lazy val datetimeField: Parser[Any] =
     nonSecondDatetimeField | "SECOND".ci
 
+  lazy val timeZoneField: Parser[Any] =
+    "TIMEZONE_HOUR".ci | "TIMEZONE_MINUTE".ci
+
+  lazy val extractSource: Parser[Any] =
+    datetimeValueExpression | intervalValueExpression
+
+  lazy val datetimeValueExpression: Parser[Any] = (
+      datetimeTerm
+    | intervalValueExpression ~ "+" ~ datetimeTerm
+    | datetimeValueExpression ~ "+" ~ intervalTerm
+    | datetimeValueExpression ~ "-" ~ intervalTerm
+  )
+
+  lazy val intervalTerm: Parser[Any] = (
+      intervalFactor
+    | intervalTerm2 ~ "*" ~ factor
+    | intervalTerm2 ~ "/" ~ factor
+    | term ~ "*" ~ intervalFactor
+  )
+
+  lazy val intervalFactor: Parser[Any] =
+    sign.? ~ intervalPrimary
+
+  lazy val intervalPrimary: Parser[Any] =
+    valueExpressionPrimary ~ intervalQualifier.?
+
+  lazy val intervalTerm2: Parser[Any] =
+    intervalTerm
+
+  lazy val intervalValueExpression: Parser[Any] = (
+      intervalTerm
+    | intervalValueExpression1 ~ "+" ~ intervalTerm1
+    | intervalValueExpression1 ~ "-" ~ intervalTerm1
+    | l("(") ~ datetimeValueExpression ~ "-" datetimeTerm ~ ")" ~ intervalQualifier
+  )
+
+  lazy val intervalValueExpression1: Parser[Any] =
+    intervalValueExpression
+
+  lazy val intervalTerm1: Parser[Any] =
+    intervalTerm
+
+  lazy val datetimeTerm: Parser[Any] =
+    datetimeFactor
+
+  lazy val datetimeFactor: Parser[Any] =
+    datetimePrimary ~ timeZone.?
+
+  lazy val datetimePrimary: Parser[Any] =
+    valueExpressionPrimary | datetimeValueFunction
+
+  lazy val timeZone: Parser[Any] =
+    "AT".ci ~ timeZoneSpecifier
+
+  lazy val timeZoneSpecifier: Parser[Any] =
+    "LOCAL".ci | "TIME".ci ~ "ZONE".ci ~ intervalValueExpression
+
+  lazy val lengthExpression: Parser[Any] =
+    charLengthExpression | octetLengthExpression | bitLengthExpression
+
+  lazy val charLengthExpression: Parser[Any] =
+    ("CHAR_LENGTH".ci | "CHARACTER_LENGTH".ci) ~ "(" ~ stringValueExpression ~ ")"
+
+  lazy val stringValueExpression: Parser[Any] =
+    characterValueExpression | bitValueExpression
+
+  lazy val octetLengthExpression: Parser[Any] =
+    "OCTET_LENGTH".ci ~ "(" ~ stringValueExpression ~ ")"
+
+  lazy val bitLengthExpression: Parser[Any] =
+    "BIT_LENGTH".ci ~ "(" ~ stringValueExpression ~ ")"
+
+  lazy val nullSpecification: Parser[Any] =
+    "NULL".ci
+
+  lazy val defaultSpecification: Parser[Any] =
+    "DEFAULT".ci
+
+  lazy val rowValueConstructorList: Parser[Any] =
+    rowValueConstructorElement ~ (l(",") ~ rowValueConstructorElement).*
+
+  lazy val rowSubquery: Parser[Any] =
+    subquery
+
+  lazy val compOp: Parser[Any] = (
+      equalsOperator
+    | notEqualsOperator
+    | lessThanOperator
+    | greaterThanOperator
+    | lessThanOrEqualsOperator
+    | greaterThanOrEqualsOperator
+  )
+
+  lazy val betweenPredicate: Parser[Any] =
+    rowValueConstructor ~ "NOT".ci.? ~ "BETWEEN".ci ~ rowValueConstructor ~ "AND" ~ rowValueConstructor
+
+  lazy val inPredicate: Parser[Any] =
+    rowValueConstructor ~ "NOT".ci.? ~ "IN".ci ~ inPredicateValue
+
   lazy val truthValue: Parser[Any] =
     "TRUE".ci | "FALSE".ci | "UNKNOWN".ci
 }
