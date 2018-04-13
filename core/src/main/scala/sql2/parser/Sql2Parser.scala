@@ -20,7 +20,7 @@ import parseback._
 
 import java.lang.SuppressWarnings
 
-import scala.{Any, Array}
+import scala.{Any, Array, StringContext}
 // FIXME: What is required for "foo".r support?
 import scala.Predef._
 import scala.util.matching.Regex
@@ -34,7 +34,7 @@ import scala.util.matching.Regex
 object Sql2Parser {
 
   implicit final class CaseInsensitivePattern(val s: String) extends scala.AnyVal {
-    def ci: Regex = ("(?i)" + s).r
+    def ci: Regex = s"(?i)${s}".r
   }
 
   // FIXME: Should be unecessary eventually.
@@ -89,6 +89,36 @@ object Sql2Parser {
   lazy val rightBracket: Parser[Any] =
     l("]")
 
+  lazy val token: Parser[Any] =
+    nondelimiterToken | delimiterToken
+
+  lazy val nondelimiterToken: Parser[Any] = (
+      regularIdentifier
+    | keyWord
+    | unsignedNumericLiteral
+    | nationalCharacterStringLiteral
+    | bitStringLiteral
+    | hexStringLiteral
+  )
+
+  lazy val regularIdentifier: Parser[Any] =
+    identifierBody
+
+  // FIXME: What is an appropriate identifier start?
+  lazy val identifierBody: Parser[Any] =
+    s"""\p{Alpha}\w*""".r
+
+  lazy val keyWord: Parser[Any] =
+    reservedWord | nonReservedWord
+
+  // TODO
+  lazy val reservedWord: Parser[Any] =
+    ()
+
+  // TODO
+  lazy val nonReservedWord: Parser[Any] =
+    ()
+
 
   // Literal Numbers, Strings, Dates and Times
 
@@ -125,7 +155,7 @@ object Sql2Parser {
 
   // NB: characterRepresentation+
   lazy val characters: Parser[Any] =
-    "(?[^']|'')+".r
+    "(?:[^']|'')+".r
 
   lazy val separator: Parser[Any] =
     (comment | space | newline).+
@@ -155,7 +185,7 @@ object Sql2Parser {
 
   // NB: hexit+
   lazy val hexits: Parser[Any] =
-    "\p{XDigit}+".r
+    """\p{XDigit}+""".r
 
   lazy val delimiterToken: Parser[Any] = (
       characterStringLiteral
@@ -170,6 +200,7 @@ object Sql2Parser {
     | doublePeriod
     | leftBracket
     | rightBracket
+  )
 
   lazy val characterStringLiteral: Parser[Any] =
     (introducer ~ characterSetSpecification).? ~ (quote ~!~ characters.? ~!~ quote) ~ (separator.+ ~ quote ~!~ characters.? ~!~ quote).*
@@ -207,7 +238,7 @@ object Sql2Parser {
     doubleQuote ~!~ delimitedIdentifierBody ~!~ doubleQuote
 
   lazy val delimitedIdentifierBody: Parser[Any] =
-    """(?[^"]|"")+""".r
+    """(?:[^"]|"")+""".r
 
   lazy val unqualifiedSchemaName: Parser[Any] =
     identifier
@@ -231,14 +262,65 @@ object Sql2Parser {
     quote ~!~ dateValue ~!~ quote
 
   lazy val dateValue: Parser[Any] =
-    """\d+-\d+-\d+""".r
+    dateRegex.r
+
+  lazy val dateRegex: String =
+    """\d+-\d+-\d+"""
 
   lazy val timeString: Parser[Any] =
     quote ~!~ timeAndZoneValue ~!~ quote
 
   // NB: timeValue ~ timeZoneInterval.?
   lazy val timeAndZoneValue: Parser[Any] =
-    """\d+:\d+:\d+(?.\d*)?(?[+-]\d+:\d+)?""".r
+    timeAndZoneRegex.r
+
+  lazy val timeAndZoneRegex: String =
+    s"""\d+:\d+:${secondsRegex}(?:${timeZoneIntervalRegex})?"""
+
+  lazy val secondsRegex: String =
+    """\d+(?:\.\d*)?"""
+
+  lazy val timeZoneIntervalRegex: String =
+    """[+-]\d+:\d+"""
+
+  lazy val timestampString: Parser[Any] =
+    quote ~!~ timestampValue ~!~ quote
+
+  lazy val timestampValue: Parser[Any] =
+    (dateRegex + " " + timeAndZoneRegex).r
+
+  lazy val intervalString: Parser[Any] =
+    quote ~!~ (yearMonthLiteral | dayTimeLiteral) ~!~ quote
+
+  lazy val yearMonthLiteral: Parser[Any] =
+    """(?:\d+-)?\d+""".r
+
+  lazy val dayTimeLiteral: Parser[Any] =
+    dayTimeInterval | timeInterval
+
+  lazy val dayTimeInterval: Parser[Any] =
+    s"""\d+(?: \d+(?::\d+(?::${secondsRegex}(?:${timeZoneIntervalRegex})?)?)?)?""".r
+
+  lazy val timeInterval: Parser[Any] = (
+      s"""\d+(?::\d+(?::${secondsRegex})?)?""".r
+    | s"""\d+(?::${secondsRegex})?""".r
+    | secondsRegex.r
+  )
+
+  lazy val notEqualsOperator: Parser[Any] =
+    l("<>")
+
+  lazy val greaterThanOrEqualsOperator: Parser[Any] =
+    l(">=")
+
+  lazy val lessThanOrEqualsOperator: Parser[Any] =
+    l("<=")
+
+  lazy val concatenationOperator: Parser[Any] =
+    l("||")
+
+  lazy val doublePeriod: Parser[Any] =
+    l("..")
 
 
   // SQL Module
@@ -257,6 +339,12 @@ object Sql2Parser {
 
 
   // Data Types
+
+  lazy val dataType: Parser[Any] =
+    ()
+
+  lazy val domainName: Parser[Any] =
+    qualifiedName
 
   lazy val qualifiedName: Parser[Any] =
     ()
@@ -562,5 +650,153 @@ object Sql2Parser {
 
   lazy val queryPrimary: Parser[Any] =
     nonJoinQueryPrimary | joinedTable
+
+
+  // Query expression components
+
+  lazy val caseExpression: Parser[Any] =
+    caseAbbreviation | caseSpecification
+
+  lazy val caseAbbreviation: Parser[Any] = (
+      "NULLIF".ci ~ "(" ~ valueExpression ~ "," ~ valueExpression ~ ")"
+    | "COALESCE".ci ~ "(" ~ valueExpression ~ (l(",") ~ valueExpression).+ ~ ")"
+  )
+
+  lazy val caseSpecification: Parser[Any] =
+    simpleCase | searchedCase
+
+  lazy val simpleCase: Parser[Any] =
+    "CASE".ci ~ caseOperand ~ simpleWhenClause.+ ~ elseClause.? ~ "END".ci
+
+  lazy val caseOperand: Parser[Any] =
+    valueExpression
+
+  lazy val simpleWhenClause: Parser[Any] =
+    "WHEN".ci ~ whenOperand ~ "THEN".ci ~ result
+
+  lazy val whenOperand: Parser[Any] =
+    valueExpression
+
+  lazy val result: Parser[Any] =
+    resultExpression | "NULL".ci
+
+  lazy val resultExpression: Parser[Any] =
+    valueExpression
+
+  lazy val elseClause: Parser[Any] =
+    "ELSE".ci ~ result
+
+  lazy val searchedCase: Parser[Any] =
+    "CASE".ci ~ searchedWhenClause.+ ~ elseClause.? ~ "END".ci
+
+  lazy val searchedWhenClause: Parser[Any] =
+    "WHEN".ci ~ searchCondition ~ "THEN".ci ~ result
+
+  lazy val castSpecification: Parser[Any] =
+    "CAST".ci ~ "(" ~ castOperand ~ "AS".ci ~ castTarget ~ ")"
+
+  lazy val castOperand: Parser[Any] =
+    valueExpression | "NULL".ci
+
+  lazy val castTarget: Parser[Any] =
+    domainName | dataType
+
+  lazy val numericValueFunction: Parser[Any] =
+    positionExpression | extractExpression | lengthExpression
+
+  lazy val positionExpression: Parser[Any] =
+    "POSITION".ci ~ "(" ~ characterValueExpression ~ "IN".ci ~ characterValueExpression ~ ")"
+
+  lazy val characterValueExpression: Parser[Any] =
+    concatenation | characterFactor
+
+  lazy val concatenation: Parser[Any] =
+    characterValueExpression ~ concatenationOperator ~ characterFactor
+
+  lazy val characterFactor: Parser[Any] =
+    characterPrimary | collateClause.?
+
+  lazy val characterPrimary: Parser[Any] =
+    valueExpressionPrimary | stringValueFunction
+
+  lazy val stringValueFunction: Parser[Any] =
+    characterValueFunction | bitValueFunction
+
+  lazy val characterValueFunction: Parser[Any] = (
+      characterSubstringFunction
+    | fold
+    | formOfUseConversion
+    | characterTranslation
+    | trimFunction
+  )
+
+  lazy val characterSubstringFunction: Parser[Any] =
+    "SUBSTRING".ci ~ "(" ~ characterValueExpression ~ "FROM".ci ~ startPosition ~ ("FOR".ci ~ stringLength).? ~ ")"
+
+  lazy val startPosition: Parser[Any] =
+    numericValueExpression
+
+  lazy val stringLength: Parser[Any] =
+    numericValueExpression
+
+  lazy val fold: Parser[Any] =
+    ("UPPER".ci | "LOWER".ci) ~ "(" ~ characterValueExpression ~ ")"
+
+  lazy val formOfUseConversion: Parser[Any] =
+    "CONVERT".ci ~ "(" ~ characterValueExpression ~ "USING".ci ~ formOfUseConversionName ~ ")"
+
+  lazy val formOfUseConversionName: Parser[Any] =
+    qualifiedName
+
+  lazy val characterTranslation: Parser[Any] =
+    "TRANSLATE".ci ~ "(" ~ characterValueExpression ~ "USING" ~ translationName ~ ")"
+
+  lazy val translationName: Parser[Any] =
+    qualifiedName
+
+  lazy val trimFuntion: Parser[Any] =
+    "TRIM".ci ~ "(" ~ trimOperands ~ ")"
+
+  lazy val trimOperands: Parser[Any] =
+    (trimSpecification.? ~ trimCharacter.? ~ "FROM".ci).? ~ trimSource
+
+  lazy val trimSpecification: Parser[Any] =
+    "LEADING".ci | "TRAILING".ci | "BOTH".ci
+
+  lazy val trimCharacter: Parser[Any] =
+    characterValueExpression
+
+  lazy val trimSource: Parser[Any] =
+    characterValueExpression
+
+  lazy val bitValueFunction: Parser[Any] =
+    bitSubstringFunction
+
+  lazy val bitSubstringFunction: Parser[Any] =
+    "SUBSTRING".ci ~ "(" ~ bitValueExpression ~ "FROM".ci ~ startPosition ~ ("FOR".ci ~ stringLength).? ~ ")"
+
+  lazy val bitValueExpression: Parser[Any] =
+    bitConcatenation | bitFactor
+
+  lazy val bitConcatenation: Parser[Any] =
+    bitValueExpression ~ concatenationOperator ~ bitFactor
+
+  lazy val bitFactor: Parser[Any] =
+    bitPrimary
+
+  lazy val bitPrimary: Parser[Any] =
+    valueExpressionPrimary | stringValueFunction
+
+  lazy val extractExpression: Parser[Any] =
+    "EXTRACT".ci ~ "(" ~ extractField ~ "FROM".ci ~ extractSource ~ ")"
+
+  lazy val extractField: Parser[Any] =
+    datetimeField | timeZoneField
+
+  lazy val datetimeField: Parser[Any] =
+    nonSecondDatetimeField | "SECOND".ci
+
+  lazy val truthValue: Parser[Any] =
+    "TRUE".ci | "FALSE".ci | "UNKNOWN".ci
 }
 
