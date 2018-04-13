@@ -44,6 +44,34 @@ object Sql2Parser {
 
   // Literal Numbers, Strings, Dates and Times
 
+  lazy val unsignedNumericLiteral: Parser[Any] = (
+      exactNumericLiteral
+    | approximateNumericLiteral
+  )
+
+  lazy val exactNumericLiteral: Parser[Any] = (
+      unsignedInteger ~ (l(".") ~ unsignedInteger.?).?
+    | l(".") ~ unsignedInteger
+  )
+
+  lazy val unsignedInteger: Parser[Any] =
+    "\\d+".r
+
+  lazy val approximateNumericLiteral: Parser[Any] =
+    mantissa ~ "E" ~ exponent
+
+  lazy val mantissa: Parser[Any] =
+    exactNumericLiteral
+
+  lazy val exponent: Parser[Any] =
+    signedInteger
+
+  lazy val signedInteger: Parser[Any] =
+    sign.? ~ unsignedInteger
+
+  lazy val sign: Parser[Any] =
+    "[+-]".r
+
   lazy val identifier: Parser[Any] =
     ()
 
@@ -86,14 +114,110 @@ object Sql2Parser {
 
   // Search Conditions
 
-  lazy val searchCondition: Parser[Any] =
-    ()
+  lazy val searchCondition: Parser[Any] = (
+      booleanTerm
+    | searchCondition ~ "OR".ci ~ booleanTerm
+  )
 
-  lazy val rowValueConstructor: Parser[Any] =
-    ()
+  lazy val booleanTerm: Parser[Any] = (
+      booleanFactor
+    | booleanTerm ~ "AND".ci ~ booleanFactor
+  )
 
-  lazy val valueExpression: Parser[Any] =
-    ()
+  lazy val booleanFactor: Parser[Any] =
+    "NOT".ci.? ~ booleanTest
+
+  lazy val booleanTest: Parser[Any] =
+    booleanPrimary ~ ("IS".ci ~ "NOT".ci.? ~ truthValue).?
+
+  lazy val booleanPrimary: Parser[Any] =
+    predicate | l("(") ~> searchCondition <~ l(")")
+
+  lazy val predicate: Parser[Any] = (
+      comparisonPredicate
+    | betweenPredicate
+    | inPredicate
+    | likePredicate
+    | nullPredicate
+    | quantifiedComparisonPredicate
+    | existsPredicate
+    | matchPredicate
+    | overlapsPredicate
+  )
+
+  lazy val comparisonPredicate: Parser[Any] =
+    rowValueConstructor ~ compOp ~ rowValueConstructor
+
+  lazy val rowValueConstructor: Parser[Any] = (
+      rowValueConstructorElement
+    | l("(") ~> rowValueConstructorList <~ l(")")
+    | rowSubquery
+  )
+
+  lazy val rowValueConstructorElement: Parser[Any] = (
+      valueExpression
+    | nullSpecification
+    | defaultSpecification
+  )
+
+  lazy val valueExpression: Parser[Any] = (
+      numericValueExpression
+    | stringValueExpression
+    | datetimeValueExpression
+    | intervalValueExpression
+  )
+
+  lazy val numericValueExpression: Parser[Any] = (
+      term
+    | numericValueExpression ~ "+" ~ term
+    | numericValueExpression ~ "-" ~ term
+  )
+
+  lazy val term: Parser[Any] = (
+      factor
+    | term ~ "*" ~ factor
+    | term ~ "/" ~ factor
+  )
+
+  lazy val factor: Parser[Any] =
+    sign.? ~ numericPrimary
+
+  lazy val numericPrimary: Parser[Any] =
+    valueExpressionPrimary | numericValueFunction
+
+  lazy val valueExpressionPrimary: Parser[Any] = (
+      unsignedValueSpecification
+    | columnReference
+    | setFunctionSpecification
+    | scalarSubquery
+    | caseExpression
+    | l("(") ~> valueExpression <~ l(")")
+    | castSpecification
+  )
+
+  lazy val unsignedValueSpecification: Parser[Any] =
+    unsignedLiteral | generalValueSpecification
+
+  lazy val unsignedLiteral: Parser[Any] =
+    unsignedNumericLiteral | generalLiteral
+
+  // NB: USER expressions and variables omitted.
+  lazy val generalValueSpecification: Parser[Any] = (
+      parameterSpecification
+    | dynamicParameterSpecification
+  )
+
+  lazy val parameterSpecification: Parser[Any] =
+    parameterName ~ indicatorParameter.?
+
+  lazy val parameterName: Parser[Any] =
+    l(":") ~ identifier
+
+  lazy val indicatorParameter: Parser[Any] =
+    "INDICATOR".ci.? ~ parameterName
+
+  lazy val dynamicParameterSpecification: Parser[Any] =
+    "?".ci
 
   lazy val columnReference: Parser[Any] =
     (qualifier ~ ".").? ~ columnName
